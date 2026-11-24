@@ -1,4 +1,14 @@
-PASS midi 2 ready=True: movement, firing, cassette, BREAK exit; 272 UART bytes; score 30
-PASS midi 3 ready=True: movement, firing, cassette, BREAK exit; 236 UART bytes; score 30
-PASS fx 3 ready=True: movement, firing, cassette, BREAK exit; 0 UART bytes; score 30
-PASS midi 3 ready=False: movement, firing, cassette, BREAK exit; 0 UART bytes; score 30
+PASS midi clock=2 UART=True intro=full: 403 UART bytes; gameplay=True; score=10; intro ticks=202
+PASS midi clock=3 UART=True intro=full: 403 UART bytes; gameplay=True; score=10; intro ticks=242
+PASS midi clock=3 UART=True intro=skip: 217 UART bytes; gameplay=True; score=10; intro ticks=32
+PASS midi clock=3 UART=True intro=mute: 77 UART bytes; gameplay=True; score=10; intro ticks=32
+PASS fx clock=3 UART=True intro=full: 0 UART bytes; gameplay=True; score=10; intro ticks=None
+PASS midi clock=3 UART=False intro=full: 0 UART bytes; gameplay=True; score=10; intro ticks=285
+PASS midi clock=3 UART=True intro=break: 77 UART bytes; gameplay=False; score=0; intro ticks=None
+PASS demo_manual 2: launch 0, return 68; score=10; silent, high score unchanged
+PASS demo_auto 3: launch 180, return 1180; score=130; silent, high score unchanged
+PASS first frame: 35 visible alien masks, four shields, HUD and animation
+PASS five row hits, distinct 25/20/10 scoring and high score
+PASS mystery saucer 500-point hit
+PASS projectile damages either bunker row
+PASS bomb spawned at cannon height hits immediately

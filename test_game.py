@@ -7,12 +7,12 @@ from pathlib import Path
 import struct
 ROOT=Path(__file__).resolve().parent
 class CPU:
- def __init__(self,mode='midi',clock='3',break_at=100,uart_ok=True):
+ def __init__(self,mode='midi',clock='3',break_at=400,uart_ok=True,action='full'):
   self.mem=bytearray(65536);p=0;cmd=(ROOT/'INVADERS.CMD').read_bytes()
   while cmd[p]==1:
    n=cmd[p+1] or 256;adr=int.from_bytes(cmd[p+2:p+4],'little');self.mem[adr:adr+n-2]=cmd[p+4:p+2+n];p+=n+2
   assert cmd[p:p+2]==bytes([2,2]);self.pc=int.from_bytes(cmd[p+2:p+4],'little');self.sp=0xf000
-  self.r=[0]*8;self.z=False;self.c=False;self.steps=0;self.ticks=0;self.smf=b'';self.mode=mode;self.max_score=0;self.seen_game=False;self.fired=False;self.moved=False;self.pos=0;self.clock=clock;self.break_at=break_at;self.uart_ok=uart_ok;self.uart=[];self.ports=[];self.text='';self.closed=False
+  self.r=[0]*8;self.z=False;self.c=False;self.steps=0;self.ticks=0;self.smf=b'';self.mode=mode;self.max_score=0;self.seen_game=False;self.fired=False;self.moved=False;self.pos=0;self.clock=clock;self.break_at=break_at;self.uart_ok=uart_ok;self.uart=[];self.ports=[];self.text='';self.closed=False;self.action=action;self.intro_tick=None;self.game_tick=None;self.game_uart=None;self.first_frame=None;self.demo_enter=None;self.demo_return=None;self.demo_score=0;self.demo_frames=0
 
  def word(self,a):return self.mem[a]|self.mem[(a+1)&65535]<<8
  def writeword(self,a,x):self.mem[a]=x&255;self.mem[(a+1)&65535]=(x>>8)&255
@@ -50,9 +50,30 @@ class CPU:
    if self.steps%3000==0:
     self.ticks+=1;self.mem[0x4288]=self.ticks&255
    self.mem[0x3810]=4 if self.clock=='2' else 8
-   self.mem[0x3840]=(1 if self.mode=='midi' else 2) if self.ticks<4 else (128 if self.ticks%9==0 else (32 if 10<=self.ticks<15 else (64 if 20<=self.ticks<25 else 0)))
-   if self.break_at is not None and self.ticks>=self.break_at:self.mem[0x3840]=4
    p=self.pc
+   if p==SYMS['intro_loop'] and self.intro_tick is None:self.intro_tick=self.ticks
+   if p==SYMS['frame_wait'] and self.game_tick is None:self.game_tick=self.ticks;self.game_uart=len(self.uart);self.first_frame=bytes(self.mem[0x3c00:0x4000])
+   if self.game_tick is not None:
+    age=self.ticks-self.game_tick
+    key=128 if age%9==0 else (32 if 10<=age<15 else (64 if 20<=age<25 else 0))
+    if age>=100:key=4
+   elif self.intro_tick is not None:
+    age=self.ticks-self.intro_tick
+    key=({'skip':128,'mute':2,'break':4}.get(self.action,0) if age>=30 else 0)
+   else:key=(1 if self.mode=='midi' else 2)
+   if self.mode.startswith('demo'):
+    active=self.mem[SYMS['demo']]
+    if active and self.demo_enter is None:self.demo_enter=self.ticks
+    if self.demo_enter is not None and not active and p==SYMS['menu'] and self.demo_return is None:self.demo_return=self.ticks
+    if self.demo_enter is None:key=128 if self.mode=='demo_manual' else 0
+    elif self.demo_return is not None:key=4
+    elif self.mode=='demo_manual' and self.ticks-self.demo_enter<4:key=128
+    elif self.mode=='demo_manual' and 65<=self.ticks-self.demo_enter<68:key=1
+    else:key=0
+    if active and p==SYMS['frame_wait']:
+     self.demo_score=max(self.demo_score,int(bytes(self.mem[SYMS['score']:SYMS['score']+4])))
+   self.mem[0x3840]=key
+   if self.break_at is not None and self.ticks>=self.break_at:self.mem[0x3840]=4
    if p==0x402d:return self
    if p==SYMS['frame_wait']:
     self.seen_game=True;self.fired |= self.mem[SYMS['shoty']]!=0;self.moved |= self.mem[SYMS['px']]!=31
@@ -116,12 +137,43 @@ class CPU:
   raise AssertionError('step limit exceeded')
 
 SYMS={k:int(v,16) for v,k in (l.split() for l in (ROOT/'INVADERS.MAP').read_text().splitlines())}
-for mode,clock,ready in [('midi','2',True),('midi','3',True),('fx','3',True),('midi','3',False)]:
- c=CPU(mode,clock,uart_ok=ready).run();assert c.seen_game and c.fired and c.moved and c.sp==0xf000,(mode,clock,c.seen_game,c.fired,c.moved,c.sp)
- raw=bytes(v for _,v in c.uart)
- assert any(p==255 and v==1 for p,v in c.ports), 'no cassette pulses'
- if mode=='midi' and ready:
-  assert raw.startswith(bytes.fromhex('B04000 B04200 B04300 B07B00 C047')) and raw.endswith(bytes.fromhex('B04000 B04200 B04300 B07B00'))
-  assert bytes.fromhex('902450 904344') in raw
- else:assert not raw
- print(f'PASS {mode} {clock} ready={ready}: movement, firing, cassette, BREAK exit; {len(raw)} UART bytes; score {c.max_score}')
+def expected_intro(clock):
+ # Read generated table from the CMD memory (checked separately against INTRO.MID).
+ c=CPU(clock=clock);i=SYMS['intro25' if clock=='2' else 'intro30'];out=bytearray()
+ while True:
+  at,n=c.mem[i:i+2];i+=2
+  if not n or at==(200 if clock=='2' else 240):break
+  out.extend(c.mem[i:i+n]);i+=n
+ return bytes.fromhex('B04000 B04200 B04300 B07B00')+out
+if __name__=='__main__':
+ for mode,clock,ready,action in [('midi','2',True,'full'),('midi','3',True,'full'),('midi','3',True,'skip'),('midi','3',True,'mute'),('fx','3',True,'full'),('midi','3',False,'full'),('midi','3',True,'break')]:
+  c=CPU(mode,clock,uart_ok=ready,action=action).run();raw=bytes(v for _,v in c.uart)
+  assert c.sp==0xf000
+  if action=='break':assert not c.seen_game and raw.endswith(bytes.fromhex('B04000 B04200 B04300 B07B00'))
+  else:
+   assert c.seen_game and c.fired and c.moved,(mode,clock,action,c.seen_game,c.fired,c.moved)
+   assert any(p==255 and v==1 for p,v in c.ports),'no cassette pulses'
+  if mode=='midi' and ready:
+   assert raw.startswith(bytes.fromhex('B04000 B04200 B04300 B07B00 C037'))
+   if action=='full':
+    assert raw.startswith(expected_intro(clock)),(clock,raw.hex())
+    assert c.game_tick-c.intro_tick in ((200,201,202,203) if clock=='2' else (240,241,242,243)),(clock,c.game_tick,c.intro_tick)
+   if action in ('full','skip'):
+    assert raw[c.game_uart:].startswith(bytes.fromhex('B04000 B04200 B04300 B07B00 C047'))
+    assert bytes.fromhex('902450 904344') in raw[c.game_uart:]
+   if action=='mute':assert len(raw)==c.game_uart
+   assert raw.endswith(bytes.fromhex('B04000 B04200 B04300 B07B00'))
+  else:assert not raw
+  print(f'PASS {mode} clock={clock} UART={ready} intro={action}: {len(raw)} UART bytes; gameplay={c.seen_game}; score={c.max_score}; intro ticks={None if c.game_tick is None or c.intro_tick is None else c.game_tick-c.intro_tick}')
+
+ # Automatic attract and manual launch/cancel, using the same machine code.
+ for mode,clock in [('demo_manual','2'),('demo_auto','3')]:
+  c=CPU(mode,clock,break_at=None).run(maxsteps=16000000)
+  assert c.demo_enter is not None and c.demo_return is not None,(mode,c.demo_enter,c.demo_return)
+  assert c.fired and c.moved and c.demo_score>0,(mode,c.fired,c.moved,c.demo_score)
+  assert bytes(c.mem[SYMS['hiscore']:SYMS['hiscore']+4])==b'0000'
+  assert not c.uart and not any(p==255 and v for p,v in c.ports) and c.sp==0xf000
+  if mode=='demo_auto':assert c.demo_enter in (180,181),(clock,c.demo_enter)
+  else:assert 65<=c.demo_return-c.demo_enter<70
+  assert b'DEMO - KEY FOR MENU' in c.first_frame
+  print(f'PASS {mode} {clock}: launch {c.demo_enter}, return {c.demo_return}; score={c.demo_score}; silent, high score unchanged')
