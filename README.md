@@ -2,7 +2,7 @@
 
 An original Space Invaders-style Z80 game for a 48K TRS-80 Model III, with cassette sound effects and simultaneous Yamaha EMT-10 AWM music over the project's external 9600-baud RS-232-to-MIDI bridge.
 
-**v0.4 development prototype (recreated arcade gameplay and attract mode)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+**v0.5 performance prototype (same arcade gameplay, faster rendering and scoring)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
 
 ## Quick start in trs80gp
 
@@ -53,13 +53,22 @@ Expected opening bytes: `B0 40 00 B0 42 00 B0 43 00 B0 7B 00 C0 37` (pedals off,
 - Embedded original 16-step bass/brass ostinato, using native EMT-10 Bass Split program 71 on channel 1. Non-blocking UART queue; no MIDI file parsing during gameplay. Missing or busy UART does not trap the main loop. Exit cleanup is bounded; with disconnected hardware delivery cannot be guaranteed.
 - INTRO.MID: standalone original eight-second Upright Bass + Brass intro (program 55), format 0. Play it with MIDIPLAY from the related project. The same composition is embedded in the game as two compact event tables for 25/30 Hz. The title screen remains visible for eight seconds, then gameplay starts. The title sequence has no disk reads; a bounded flush and explicit note-offs handle skipping, muting and exit. If the UART stalls during the intro cleanup, MIDI is disabled for that round. Level-completion and game-over music are planned, not implemented.
 
+## Performance improvements in v0.5
+
+- Unrolled screen clear and 32-byte LDI blit; interrupts remain enabled.
+- Cached alien row addresses and laser row intersection; direct mask copying on clear rows, original-style mask merging near bunkers.
+- Decimal scoring adds the award directly instead of incrementing once per point.
+- No changes to game rules, intended timer rate, audio sequence or artwork. Empty sprite mask bytes now use ASCII space (32), not zero.
+
+Estimated nominal Z80 T-states for a complete opening-frame render: 93,084 (v0.4) to 60,466 (v0.5), 35.0% less work. At approximately 2.03 MHz this is about 46 ms to 30 ms of rendering alone, excluding interrupts, memory waits, game logic, effects and serial service. This is not measured FPS. The full game may still miss 25/30 Hz ticks. See [PERFORMANCE.md](PERFORMANCE.md) and BENCHMARK.txt for details.
+
 ## Build and test
 
 `python build.py` assembles the restricted Z80 source (standard library only), creates INVADERS.CMD and INVADERS.MAP, and verifies CMD records. `python test_game.py` runs the audio/game-loop mock tests; `python test_graphics.py` verifies the new rendering and collision routines. `python make_intro.py` regenerates the standalone intro. Run `python embed_intro.py` to regenerate both embedded event tables before `python build.py`. See TESTS.txt for results. Mock tests verify manual and idle demo activation, demo scoring isolation and silent operation, both title clock rates and byte streams, skip, mute, BREAK during the title, no UART, movement, firing, scoring and cassette pulses; they do not model real timing, interrupts, display or electrical behaviour.
 
 ## Developer documentation
 
-`INVADERS.ASM` includes numbered sections, a hardware and memory map, routine contracts, algorithm explanations and comments for every workspace declaration. See [SOURCE-GUIDE.md](SOURCE-GUIDE.md) for the frame scheduler, modification points, MIDI queue rules and build workflow. This edition adds silent attract mode to the v0.3 gameplay and graphics. See the generated map for current addresses.
+`INVADERS.ASM` includes numbered sections, a hardware and memory map, routine contracts, algorithm explanations and comments for every workspace declaration. See [SOURCE-GUIDE.md](SOURCE-GUIDE.md) for the frame scheduler, modification points, MIDI queue rules and build workflow. This edition preserves the v0.4 attract mode and improves the rendering and score hot paths. See the generated map for current addresses.
 
 ## Related project
 
@@ -73,4 +82,4 @@ MIT; see LICENSE. Original project materials only.
 
 This is a new implementation inspired by Doug Kennedy’s 1980 Space Intruders, using its observed 7×5 formation, 14-pixel horizontal spacing, five-pixel vertical spacing and 6×3-pixel sprites as design references. No original code or bitmap tables are imported. Its private annotated reconstruction is separate. Original screen screenshots could not be fetched, so visual fidelity is based on binary analysis, not a side-by-side emulator comparison.
 
-Limits: character-cell projectile collisions, fixed horizontal bounds, one player, one laser and one bomb, RAM-only high score, original silent attract sequence recreated; no two-player mode. The full-buffer blit and rendering may miss timer ticks on physical hardware; timing and sound need real testing. The eight-second title introduction and background MIDI remain from v0.2.
+Limits: character-cell projectile collisions, fixed horizontal bounds, one player, one laser and one bomb, RAM-only high score, original silent attract sequence recreated; no two-player mode. The optimised full-buffer blit and rendering may still miss timer ticks on physical hardware; timing and sound need real testing. The eight-second title introduction and background MIDI remain from v0.2.

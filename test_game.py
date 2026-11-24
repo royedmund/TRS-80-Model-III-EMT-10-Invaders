@@ -12,7 +12,7 @@ class CPU:
   while cmd[p]==1:
    n=cmd[p+1] or 256;adr=int.from_bytes(cmd[p+2:p+4],'little');self.mem[adr:adr+n-2]=cmd[p+4:p+2+n];p+=n+2
   assert cmd[p:p+2]==bytes([2,2]);self.pc=int.from_bytes(cmd[p+2:p+4],'little');self.sp=0xf000
-  self.r=[0]*8;self.z=False;self.c=False;self.steps=0;self.ticks=0;self.smf=b'';self.mode=mode;self.max_score=0;self.seen_game=False;self.fired=False;self.moved=False;self.pos=0;self.clock=clock;self.break_at=break_at;self.uart_ok=uart_ok;self.uart=[];self.ports=[];self.text='';self.closed=False;self.action=action;self.intro_tick=None;self.game_tick=None;self.game_uart=None;self.first_frame=None;self.demo_enter=None;self.demo_return=None;self.demo_score=0;self.demo_frames=0
+  self.r=[0]*8;self.z=False;self.c=False;self.pv=False;self.steps=0;self.ticks=0;self.smf=b'';self.mode=mode;self.max_score=0;self.seen_game=False;self.fired=False;self.moved=False;self.pos=0;self.clock=clock;self.break_at=break_at;self.uart_ok=uart_ok;self.uart=[];self.ports=[];self.text='';self.closed=False;self.action=action;self.intro_tick=None;self.game_tick=None;self.game_uart=None;self.first_frame=None;self.demo_enter=None;self.demo_return=None;self.demo_score=0;self.demo_frames=0
 
  def word(self,a):return self.mem[a]|self.mem[(a+1)&65535]<<8
  def writeword(self,a,x):self.mem[a]=x&255;self.mem[(a+1)&65535]=(x>>8)&255
@@ -31,7 +31,7 @@ class CPU:
  def fetchw(self):lo=self.fetch();return lo|(self.fetch()<<8)
  def push(self,x):self.sp=(self.sp-2)&65535;self.writeword(self.sp,x)
  def pop(self):x=self.word(self.sp);self.sp=(self.sp+2)&65535;return x
- def cond(self,i):return [not self.z,self.z,not self.c,self.c,False,False,False,False][i]
+ def cond(self,i):return [not self.z,self.z,not self.c,self.c,not self.pv,self.pv,False,False][i]
  def alu(self,op,v):
   a=self.r[7]
   if op==0:r=a+v;self.c=r>255
@@ -103,15 +103,20 @@ class CPU:
    elif op==0x22:self.writeword(self.fetchw(),self.pair(2))
    elif op==0x1a:self.r[7]=self.mem[self.pair(1)]
    elif op==0x12:self.mem[self.pair(1)]=self.r[7]
+   elif op==0xeb:
+    de=self.pair(1);self.setpair(1,self.pair(2));self.setpair(2,de)
    elif op==0xc6:v=self.r[7]+self.fetch();self.r[7]=v&255;self.c=v>255;self.z=self.r[7]==0
    elif 0x80<=op<=0xbf:self.alu((op>>3)&7,self.get(op&7))
    elif op in (0xd6,0xe6,0xee,0xf6,0xfe):self.alu((op>>3)&7,self.fetch())
    elif op==0xed:
     sub=self.fetch();i=(sub>>4)&3
-    if sub==0xb0:
+    if sub==0xa0:
+     hl=self.pair(2);de=self.pair(1);self.mem[de]=self.mem[hl]
+     self.setpair(2,hl+1);self.setpair(1,de+1);self.setpair(0,self.pair(0)-1);self.pv=self.pair(0)!=0
+    elif sub==0xb0:
      n=self.pair(0) or 65536;hl=self.pair(2);de=self.pair(1)
      for _ in range(n):self.mem[de]=self.mem[hl];hl=(hl+1)&65535;de=(de+1)&65535
-     self.setpair(0,0);self.setpair(1,de);self.setpair(2,hl)
+     self.setpair(0,0);self.setpair(1,de);self.setpair(2,hl);self.pv=False
     elif sub&0xcf==0x43:self.writeword(self.fetchw(),self.pair(i))
     elif sub&0xcf==0x4b:self.setpair(i,self.word(self.fetchw()))
     elif sub&0xcf in (0x42,0x4a):

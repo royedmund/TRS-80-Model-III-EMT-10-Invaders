@@ -1,4 +1,4 @@
-# Star Siege v0.4 — Z80 developer guide
+# Star Siege v0.5 — Z80 developer guide
 
 This edition recreates the classic 35-alien formation using the existing documented Star Siege engine. `INVADERS.ASM` is newly developed code; the original disassembly is a separate private reference.
 
@@ -39,12 +39,20 @@ Wait for TIMER$ change, pumping MIDI and polling BREAK
   -> repeat or start next wave / game over
 ```
 
-There is no interrupt-driven game loop. The existing LDOS timer interrupt supplies the timebase. Missed ticks are not replayed. The full 1 KB screen is composed in RAM, then copied to video memory with `LDIR`; this is not hardware double buffering.
+There is no interrupt-driven game loop. The existing LDOS timer interrupt supplies the timebase. Missed ticks are not replayed. The full 1 KB screen is composed in RAM, then copied to video memory with a 32-instruction `LDI` unrolled loop; this is not hardware double buffering.
+
+## Performance hot paths
+
+`blank` uses 16 unrolled stores per iteration, preserving A and leaving DE alone. `present` uses 32 LDI instructions per loop; P/V from the final LDI controls JP PE, so BC must start at 1024 and the block size must divide it. Do not introduce instructions between the last LDI and JP PE that change P/V. LDOS interrupts must preserve registers/flags as normal; no stack-pointer or interrupt tricks are used.
+
+`row_dest` caches the first cell address for each row and advances seven cells for every alien, including dead ones. `row_shot` caches whether the active laser intersects that row; clear it when a shot hits. The fast sprite path is only safe in rows whose cells cannot overlap existing art. The fallback merges masks near the shields. `score_add` propagates decimal carries without the previous per-point loop; preserve four-digit wrapping and high-score isolation in demos.
+
+See PERFORMANCE.md for measured instruction-cost comparisons and reproduction commands.
 
 ## Where to make changes
 
 - **Alien speed:** thresholds and delays in `advance_aliens` / `alien_speed`. Wave 2 onwards subtracts one tick. Bounds are fixed to the original formation geometry; update the bounds if changing alien spacing or count.
-- **Sprites:** `sprite_ptrs` selects one of 18 six-byte packed masks (3 types × 2 frames × 3 vertical phases); `row_offsets` and `row_phases` encode the five-pixel row pitch. `draw_sprite` merges masks across two rows. Cannon codes are in `render_player`; projectiles in `render` / `render_bomb`. Collision remains character-cell based. `cell` does not bounds-check.
+- **Sprites:** `sprite_ptrs` selects one of 18 six-byte packed masks (3 types × 2 frames × 3 vertical phases); `row_offsets` and `row_phases` encode the five-pixel row pitch. `draw_sprite` uses direct LDI on rows below 10 (row index < 10) and mask merging near the bunker rows. Empty mask bytes must be 32. The direct path depends on sprites not sharing character cells and bunkers starting at row 11. Cannon codes are in `render_player`; projectiles in `render` / `render_bomb`. Collision remains character-cell based. `cell` does not bounds-check.
 - **Shields:** starting offsets in `newwave`, width in `make_shield`, two collision rows in `shield_hit` and screen offset in `render`. Keep all these consistent.
 - **Cassette FX:** cycle counts and half-period counters in `effect_play`, `fx_shot`, `fx_hit`. These are blocking CPU delay loops, so keep them short. Effects have one shared pending slot, not a queue.
 - **Background music:** `bassline` and `leadline` contain 16 MIDI pitches each, with index wrapped by `AND 15`. Adjust both table lengths and wrap logic together if extending. `setup_midi` contains the program change, decimal 71 (`C0 47` hex). Bass notes must remain below 55 and upper notes at or above 55 for the intended EMT-10 split. `musicrate` is selected in the menu.
@@ -66,4 +74,4 @@ The assembler supports the limited syntax used by this source; it is not a full 
 
 ## Current constraints
 
-Single player, one laser and one bomb, fixed 35-alien formation bounds, mystery UFO worth 500, session-only high score, no victory or game-over music yet. Score wraps at 10000, wave display is a single hexadecimal digit, and wave state is an eight-bit counter. The game uses a private stack and assumes RAM 6000H–73C1H is available. It clears the display and restores the original stack at exit, but does not restore the previous UART settings. Hardware audio and timing remain to be tested.
+Single player, one laser and one bomb, fixed 35-alien formation bounds, mystery UFO worth 500, session-only high score, no victory or game-over music yet. Score wraps at 10000, wave display is a single hexadecimal digit, and wave state is an eight-bit counter. The game uses a private stack and assumes RAM 6000H–7496H is available. It clears the display and restores the original stack at exit, but does not restore the previous UART settings. Hardware audio and timing remain to be tested.

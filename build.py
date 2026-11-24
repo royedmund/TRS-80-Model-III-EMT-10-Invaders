@@ -45,6 +45,7 @@ def assemble(passno):
    if x in r16:return [0x01+16*r16[x]]+w(val(y))
    if x in r8:return [0x06+8*r8[x],val(y)&255]
   if op=='ldir':return [0xed,0xb0]
+  if op=='ldi':return [0xed,0xa0]
   if op=='rlca':return [7]
   if op=='cpl':return [0x2f]
   if op=='nop':return [0]

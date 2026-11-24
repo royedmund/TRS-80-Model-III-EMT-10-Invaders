@@ -1,5 +1,5 @@
 ; ============================================================================
-; STAR SIEGE v0.4 - TRS-80 Model III / Yamaha EMT-10
+; STAR SIEGE v0.5 - TRS-80 Model III / Yamaha EMT-10
 ; Original recreation inspired by Space Intruders (1980), not a port of its code.
 ; Original Space Invaders-style game. MIT licence - see LICENSE.
 ; ============================================================================
@@ -896,25 +896,92 @@ cell:
     add hl,de
     ret
 
-; Fill entire back buffer with ASCII space 32. LDIR copies the first byte
-; through the remaining 1023 cells using overlapping source/destination.
-; Clobbers BC/DE/HL and LDIR flags; no visible update until present.
+; Fill entire back buffer with ASCII 32 using 16 unrolled stores per pass.
+; 64 iterations; preserves A, clobbers BC/HL and flags (DE unchanged).
+; Avoids 1023 repeated LDIR transfers and never borrows the stack pointer.
 blank:
+    ld c,a
+    ld a,32
     ld hl,screen
-    ld (hl),32
-    ld de,screen+1
-    ld bc,1023
-    ldir
+    ld b,64
+blank_block:
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    ld (hl),a
+    inc hl
+    djnz blank_block
+    ld a,c
     ret
 
-; Copy exactly 1024 bytes from back buffer to physical video RAM with
-; LDIR. This is a full-screen blit, not hardware page flipping or vsync.
-; Clobbers BC/DE/HL and LDIR flags; no ROM display calls.
+; Full 1024-byte back-buffer blit: 32 LDI instructions per block.
+; LDI sets P/V if BC remains nonzero; final JP PE repeats until BC=0.
+; No interrupt masking or stack tricks. A preserved, BC/DE/HL clobbered.
 present:
     ld hl,screen
     ld de,0x3c00
     ld bc,1024
-    ldir
+present_block:
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    ldi
+    jp pe,present_block
     ret
 
 ; Input HL=zero-terminated string, DE=destination buffer address.
@@ -935,7 +1002,7 @@ text:
 ; Draw HUD, two rows of shields, 35 aliens, mystery ship and projectiles.
 ; Each alien uses original 6x3-pixel art. Its Y position is 5 pixels per
 ; row: table offsets [0,1,3,5,6], phases [0,2,1,0,2]. Each packed sprite
-; has 3 cells in the first row and 3 in the second (zero mask = skip).
+; has 3 cells in the first row and 3 in the second (space mask = skip).
 ; Collision is approximate character-cell bounding boxes, not pixel-perfect.
 render:
     call blank
@@ -1021,6 +1088,33 @@ sprite_phase:
     ld (hl),d
     ld a,(ax)
     ld (colx),a
+    ld c,a
+    ld a,(rowy)
+    ld b,a
+    call cell
+    ld (row_dest),hl
+    ; Shot can only intersect this row if its Y matches an occupied row.
+    ; Cache the result, avoiding repeated Y comparisons for seven aliens.
+    xor a
+    ld (row_shot),a
+    ld a,(shoty)
+    or a
+    jp z,row_ready
+    ld b,a
+    ld a,(rowy)
+    cp b
+    jp z,row_shot_match
+    ld a,(phase)
+    or a
+    jp z,row_ready
+    ld a,(rowy)
+    inc a
+    cp b
+    jp nz,row_ready
+row_shot_match:
+    ld a,1
+    ld (row_shot),a
+row_ready:
     ld a,7
     ld (colleft),a
 alien_loop:
@@ -1028,18 +1122,9 @@ alien_loop:
     ld a,(hl)
     or a
     jp z,next_alien
-    ld a,(shoty)
-    ld b,a
-    ld a,(rowy)
-    cp b
-    jp z,check_alien_x
-    ld a,(phase)
+    ld a,(row_shot)
     or a
     jp z,draw_alien
-    ld a,(rowy)
-    inc a
-    cp b
-    jp nz,draw_alien
 check_alien_x:
     ld a,(colx)
     ld b,a
@@ -1050,6 +1135,7 @@ check_alien_x:
     ld (hl),0
     xor a
     ld (shoty),a
+    ld (row_shot),a  ; One projectile can destroy only one alien.
     ld hl,alive
     dec (hl)
     ld a,2
@@ -1067,13 +1153,7 @@ check_alien_x:
 ; by row type, animation frame and fractional vertical phase.
 draw_alien:
     ld de,(row_sprite)
-    push de
-    ld a,(rowy)
-    ld b,a
-    ld a,(colx)
-    ld c,a
-    call cell
-    pop de
+    ld hl,(row_dest)
     call draw_sprite
 
 ; Use bottom occupied sprite row as candidate bomb origin. Prefer
@@ -1104,6 +1184,10 @@ next_alien:
     ld hl,(flagptr)
     inc hl
     ld (flagptr),hl
+    ld hl,(row_dest)
+    ld de,7
+    add hl,de
+    ld (row_dest),hl
     ld a,(colx)
     add a,7
     ld (colx),a
@@ -1126,34 +1210,88 @@ next_alien:
     ld (hl),149
     jp render_bomb
 
-; Merge six mask bytes into the buffer. Space is not a semigraphic byte;
-; replace it with 80H before OR. Skip empty masks. 3 cells then next row.
-; Input HL=destination, DE=6-byte mask. Clobbers AF,BC,DE,HL.
+; Merge packed masks into existing buffer; preserve shield overlap semantics.
+; Input HL=destination, DE=6-byte mask; phase is current row's phase.
+; Phase 0 has no second-row pixels (all such masks end in 32,32,32).
+; Unroll each three-cell line to remove DJNZ loop overhead.
+; Clobbers AF,BC,DE,HL. Only called by draw_alien.
 draw_sprite:
-    ld b,3
+    ld a,(rowy)
+    cp 10
+    jp c,sprite_fast
     call sprite_line
+    ld a,(phase)
+    or a
+    ret z
     push de
     ld de,61
     add hl,de
     pop de
-    ld b,3
     jp sprite_line
 sprite_line:
     ld a,(de)
-    or a
-    jp z,sprite_next
+    cp 32
+    jp z,sprite_skip0
     ld c,a
     ld a,(hl)
     cp 32
-    jp nz,sprite_merge
+    jp nz,sprite_merge0
     ld a,128
-sprite_merge:
+sprite_merge0:
     or c
     ld (hl),a
-sprite_next:
+sprite_skip0:
     inc hl
     inc de
-    djnz sprite_line
+    ld a,(de)
+    cp 32
+    jp z,sprite_skip1
+    ld c,a
+    ld a,(hl)
+    cp 32
+    jp nz,sprite_merge1
+    ld a,128
+sprite_merge1:
+    or c
+    ld (hl),a
+sprite_skip1:
+    inc hl
+    inc de
+    ld a,(de)
+    cp 32
+    jp z,sprite_skip2
+    ld c,a
+    ld a,(hl)
+    cp 32
+    jp nz,sprite_merge2
+    ld a,128
+sprite_merge2:
+    or c
+    ld (hl),a
+sprite_skip2:
+    inc hl
+    inc de
+    ret
+
+; Fast path: row < 10, both rows are clear of bunkers (rows 11/12).
+; The formation geometry gives each alien exclusive character cells.
+; Direct copy of space-padded masks is equivalent to the OR merge.
+; HL=destination, DE=source on entry; swap for LDI. No live BC value.
+sprite_fast:
+    ex de,hl
+    ldi
+    ldi
+    ldi
+    ld a,(phase)
+    or a
+    ret z
+    ex de,hl
+    ld bc,61
+    add hl,bc
+    ex de,hl
+    ldi
+    ldi
+    ldi
     ret
 
 ; Mystery ship on row 1. Award 500 points if the laser hits its four-cell
@@ -1229,24 +1367,34 @@ floor_loop:
     djnz floor_loop
     jp present
 
-; A=points (1..100). Increment decimal score once per point; updates
-; high score in RAM if larger. Rare path (hit only), simple and bounded.
+; A=points (1..100). Add to four ASCII decimal digits directly.
+; Convert each sum into a digit and carry by subtracting ten at most
+; ten times on the units digit and at most once on later digits.
+; Discard carry beyond thousands (same 10000 wrap as v0.4).
+; Update high score after the addition; retain the five separate 100-point
+; additions for UFO hits so high-score behavior across wrap is unchanged.
 score_add:
-    ld c,a
-score_point:
     ld hl,score+3
     ld b,4
-score_carry:
-    inc (hl)
-    ld a,(hl)
-    cp 58
-    jp c,score_next_point
-    ld (hl),48
+score_digit:
+    add a,(hl)
+    sub 48
+    ld c,0
+score_reduce:
+    cp 10
+    jp c,score_store
+    sub 10
+    inc c
+    jp score_reduce
+score_store:
+    add a,48
+    ld (hl),a
+    ld a,c
+    or a
+    jp z,score_done
     dec hl
-    djnz score_carry
-score_next_point:
-    dec c
-    jp nz,score_point
+    djnz score_digit
+score_done:
     ld a,(demo)
     or a
     ret nz                    ; Demo scores never enter session high score.
@@ -1575,24 +1723,24 @@ sprite_ptrs:
     dw art3_0,art3_1,art3_2
     dw art4_0,art4_1,art4_2
     dw art5_0,art5_1,art5_2
-art0_0: db 152,191,164,0,0,0
+art0_0: db 152,191,164,32,32,32
 art0_1: db 160,188,144,129,131,130
-art0_2: db 0,176,0,134,143,137
-art1_0: db 172,143,156,0,0,0
-art1_1: db 176,188,176,130,0,129
-art1_2: db 0,176,0,139,131,135
-art2_0: db 173,188,158,0,0,0
+art0_2: db 32,176,32,134,143,137
+art1_0: db 172,143,156,32,32,32
+art1_1: db 176,188,176,130,32,129
+art1_2: db 32,176,32,139,131,135
+art2_0: db 173,188,158,32,32,32
 art2_1: db 180,176,184,130,131,129
-art2_2: db 144,0,160,139,143,135
-art3_0: db 158,140,173,0,0,0
-art3_1: db 184,176,180,129,0,130
-art3_2: db 160,0,144,135,131,139
-art4_0: db 150,143,169,0,0,0
-art4_1: db 152,188,164,129,0,130
+art2_2: db 144,32,160,139,143,135
+art3_0: db 158,140,173,32,32,32
+art3_1: db 184,176,180,129,32,130
+art3_2: db 160,32,144,135,131,139
+art4_0: db 150,143,169,32,32,32
+art4_1: db 152,188,164,129,32,130
 art4_2: db 160,176,144,133,131,138
-art5_0: db 174,131,157,0,0,0
-art5_1: db 184,140,180,130,0,129
-art5_2: db 160,176,144,139,0,135
+art5_0: db 174,131,157,32,32,32
+art5_1: db 184,140,180,130,32,129
+art5_2: db 160,176,144,139,32,135
 
 bassline: db 36,36,43,36,39,39,46,39,41,41,48,41,38,38,45,38
 leadline: db 67,72,70,74,70,75,74,77,72,77,75,79,69,74,72,67
@@ -1752,6 +1900,8 @@ phase: db 0                     ; Pixel Y offset within a character row.
 anim: db 0                      ; Alternate alien artwork every step.
 ufox: db 0                      ; Mystery saucer column, 0=inactive.
 ufowait: db 100                 ; Countdown to saucer appearance.
+row_dest: dw 0                  ; Cached destination, advances seven cells per alien.
+row_shot: db 0                  ; Current row can intersect active laser.
 row_sprite: dw 0                ; Cached packed sprite pointer for current row.
 flagptr: dw 0                   ; Pointer to current presence flag.
 queue: ds 18                    ; 18-byte linear UART batch.

@@ -39,3 +39,16 @@ for row in (11,12):
 print('PASS projectile damages either bunker row')
 c=initial();put(c,'launchy',13);put(c,'launchx',32);put(c,'bombwait',1);call(c,'advance_bomb');assert get(c,'lives')==2 and get(c,'bomby')==0
 print('PASS bomb spawned at cannon height hits immediately')
+# Decimal score carry and wrap, including demo isolation; direct addition must
+# preserve the v0.4 score/high-score semantics, not the per-point loop.
+for score in (0,9,99,999,9899,9975,9999):
+    for points in (10,20,25,100):
+        for demo in (0,1):
+            c=initial();put(c,'demo',demo)
+            c.mem[SYMS['score']:SYMS['score']+4]=f'{score:04d}'.encode()
+            c.mem[SYMS['hiscore']:SYMS['hiscore']+4]=b'0010'
+            c.r[7]=points;call(c,'score_add')
+            expected=(score+points)%10000
+            assert int(bytes(c.mem[SYMS['score']:SYMS['score']+4]))==expected
+            assert int(bytes(c.mem[SYMS['hiscore']:SYMS['hiscore']+4]))==(10 if demo else max(10,expected))
+print('PASS 56 decimal carry, wrap and demo high-score cases')

@@ -1,0 +1,9 @@
+Scenario | v0.4 T-states | v0.5 T-states | reduction | same VRAM/state
+35 aliens, initial | 93,084 | 60,466 | 35.0% | PASS
+35 aliens, animation B | 92,515 | 60,541 | 34.6% | PASS
+Laser hit | 94,429 | 60,955 | 35.4% | PASS
+Formation over shields | 92,958 | 64,981 | 30.1% | PASS
+Sparse formation | 65,995 | 50,953 | 22.8% | PASS
+Demo HUD, bomb, saucer | 94,426 | 61,808 | 34.5% | PASS
+Mystery ship hit | 131,319 | 65,959 | 49.8% | PASS
+PASS 120 additional render equivalence cases (VRAM and collision state).
