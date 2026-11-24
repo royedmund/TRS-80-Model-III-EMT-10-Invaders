@@ -1,0 +1,4 @@
+PASS midi 2 ready=True: movement, firing, cassette, BREAK exit; 272 UART bytes; score 30
+PASS midi 3 ready=True: movement, firing, cassette, BREAK exit; 236 UART bytes; score 30
+PASS fx 3 ready=True: movement, firing, cassette, BREAK exit; 0 UART bytes; score 30
+PASS midi 3 ready=False: movement, firing, cassette, BREAK exit; 0 UART bytes; score 30
