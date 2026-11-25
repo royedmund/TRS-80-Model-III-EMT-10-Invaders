@@ -1,5 +1,5 @@
 ; ============================================================================
-; STAR SIEGE v0.6 - audio clock prototype - TRS-80 Model III / Yamaha EMT-10
+; STAR SIEGE v0.7 - adaptive soundtrack - TRS-80 Model III / Yamaha EMT-10
 ; Original recreation inspired by Space Intruders (1980), not a port of its code.
 ; Original Space Invaders-style game. MIT licence - see LICENSE.
 ; ============================================================================
@@ -1621,10 +1621,11 @@ music_tick:
 ; Queue 80 oldbass 00, 80 oldupper 00, 90 bass 50, 90 upper 44 (hex).
 ; Both voices are channel 1: EMT-10 Bass Split routes notes by pitch.
 ; Initial old pitches are zero (harmless note-offs at first beat). Advance
-; index modulo 16, record new pitches, publish qcount last. Musicrate is
-; 5 ticks at 25 Hz or 6 at 30 Hz (about five steps per second).
+; index modulo 16, record new pitches, publish qcount last.
+; Recalculate the interval at each note pair from formation depth.
+; musicrate remains the clock selector, not the adaptive tempo.
 music_due:
-    ld a,(musicrate)
+    call music_interval
     ld (musicwait),a
     ld a,(musicindex)
     ld e,a
@@ -1679,6 +1680,34 @@ music_payload:
     add a,12
     ld (qcount),a
     ret
+; Adaptive soundtrack: ay=2 starts a wave; ay=6 is the last playable
+; depth before game over at ay=7. Clamp for defensive use and tests.
+; 25/30 Hz tables approximate the same rising pulse rate. A new wave
+; restores normal tempo at the next beat without resetting melody phase.
+; Output A=interval (2..6 ticks). Clobbers AF/DE/HL, no UART side effects.
+music_interval:
+    ld a,(ay)
+    cp 2
+    jp nc,tempo_min_ok
+    ld a,2
+tempo_min_ok:
+    cp 7
+    jp c,tempo_max_ok
+    ld a,6
+tempo_max_ok:
+    sub 2
+    ld e,a
+    ld d,0
+    ld hl,tempo25
+    ld a,(musicrate)
+    cp 5
+    jp z,tempo_lookup
+    ld hl,tempo30
+tempo_lookup:
+    add hl,de
+    ld a,(hl)
+    ret
+
 ; Drain pending data and send pedal off + All Notes Off on exit.
 ; Bounded polling; no serial hardware cannot trap the game.
 
@@ -1860,6 +1889,8 @@ art5_0: db 174,131,157,32,32,32
 art5_1: db 184,140,180,130,32,129
 art5_2: db 160,176,144,139,32,135
 
+tempo25: db 5,4,3,3,2          ; Formation ay=2..6; 200..80 ms.
+tempo30: db 6,5,4,3,2          ; Formation ay=2..6; 200..67 ms.
 bassline: db 36,36,43,36,39,39,46,39,41,41,48,41,38,38,45,38
 leadline: db 67,72,70,74,70,75,74,77,72,77,75,79,69,74,72,67
 

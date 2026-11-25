@@ -2,7 +2,33 @@
 
 An original Space Invaders-style Z80 game for a 48K TRS-80 Model III, with cassette sound effects and simultaneous Yamaha EMT-10 AWM music over the project's external 9600-baud RS-232-to-MIDI bridge.
 
-**v0.6 audio-clock prototype (based on v0.5 rendering improvements)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+**v0.7 adaptive soundtrack prototype (based on v0.6 audio clock)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+
+## v0.7 adaptive soundtrack
+
+The original gameplay bass/brass phrase accelerates as the alien formation
+descends. The tempo is recalculated at each note pair; the melody is not
+restarted, and each new wave returns to the opening speed. Applies in
+raw and timed modes. The timer selector, serial protocol, intro music,
+graphics and cassette effects are unchanged.
+
+| Formation top row (ay) | 25 Hz step | 30 Hz step |
+|---|---:|---:|
+| 2 — new wave | 200 ms | 200 ms |
+| 3 | 160 ms | 167 ms |
+| 4 | 120 ms | 133 ms |
+| 5 | 120 ms | 100 ms |
+| 6 — last playable row | 80 ms | 67 ms |
+
+The 25 Hz clock has coarser timing, so rows 4/5 share a rate.
+At fastest tempo the theoretical stream is 180 musical bytes/sec at
+30 Hz plus 30 transport markers in buffered mode (210 bytes/sec);
+actual sustained UART service and timing have not been measured.
+The v0.7 CMD was assembled after reproducing the v0.6 CMD byte for byte.
+The emitted tempo-selection routine passed 512 opcode-level checks
+(256 depth values at each clock). Full v0.7 gameplay and hardware
+regression tests remain outstanding. See test_audio_clock.py for local
+regression cases. The previous v0.6 architecture and test results follow.
 
 ## v0.6 audio-clock prototype
 

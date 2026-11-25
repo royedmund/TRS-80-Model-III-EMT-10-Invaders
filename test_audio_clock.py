@@ -87,3 +87,17 @@ for clock,action in [('2','full'),('3','full'),('4','full'),('5','full'),
             assert not any(v in game for v in (248,249,253,252))
             assert game.startswith(bytes.fromhex('B04000 B04200 B04300 B07B00 C047'))
     print('PASS CMD mock:',clock,action,len(raw),'bytes')
+
+# Adaptive tempo is bounded and resets to the opening pace on a new wave.
+for rate, expected in [(5,[5,4,3,3,2]), (6,[6,5,4,3,2])]:
+    c=CPU(break_at=None)
+    put(c,'musicrate',rate)
+    for depth in range(256):
+        put(c,'ay',depth)
+        call(c,'music_interval')
+        assert c.r[7]==expected[max(0,min(4,depth-2))]
+    for depth in (6,2):
+        put(c,'ay',depth)
+        call(c,'music_interval')
+        assert c.r[7]==expected[depth-2]
+    print('PASS adaptive tempo at',rate*5,'Hz')
