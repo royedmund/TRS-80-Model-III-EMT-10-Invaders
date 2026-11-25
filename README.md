@@ -2,7 +2,34 @@
 
 An original Space Invaders-style Z80 game for a 48K TRS-80 Model III, with cassette sound effects and simultaneous Yamaha EMT-10 AWM music over the project's external 9600-baud RS-232-to-MIDI bridge.
 
-**v0.7 adaptive soundtrack prototype (based on v0.6 audio clock)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+**v0.8 cassette laser and explosions prototype (based on v0.7 adaptive soundtrack)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+
+## v0.8 cassette sound effects
+
+The original adaptive EMT-10 soundtrack is unchanged. Cassette output
+now uses editable, asymmetric pulse-width tables. The player laser
+sweeps from a sharp attack into a lower tail, an alien hit produces
+an irregular crackling explosion, and the mystery saucer has its own
+longer, deeper explosion. Player damage retains its previous sweep.
+Music service runs every four pulses while cassette output is low.
+The demo remains silent. No new wiring, sound hardware or firmware.
+
+| Effect | Pulse pairs | Approx. duration (MIDI off, 2.027 MHz) |
+|---|---:|---:|
+| Laser | 16 | 9.1 ms |
+| Alien explosion | 24 | 18.1 ms |
+| Player damage | 18 | 8 ms |
+| Mystery saucer explosion | 28 | 29.7 ms |
+
+Estimated instruction timing excludes hardware wait states and interrupt
+overhead; MIDI service may lengthen effects. Actual pitch, loudness
+and sound quality require listening on real hardware. Effects remain
+short blocking bursts, so gameplay performance may change slightly.
+The v0.8 CMD was assembled after a byte-identical v0.7 rebuild; targeted
+opcode tests verified all four output pulse sequences, output ending low,
+silent demo/idle paths, and transmission of three pending MIDI bytes during
+the saucer explosion. Full v0.8 game/emulator/hardware tests not yet run.
+See test_cassette_fx.py for reproducible local tests.
 
 ## v0.7 adaptive soundtrack
 

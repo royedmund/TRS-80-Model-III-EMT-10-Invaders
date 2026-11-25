@@ -1,5 +1,5 @@
 ; ============================================================================
-; STAR SIEGE v0.7 - adaptive soundtrack - TRS-80 Model III / Yamaha EMT-10
+; STAR SIEGE v0.8 - cassette laser and explosions - TRS-80 Model III / Yamaha EMT-10
 ; Original recreation inspired by Space Intruders (1980), not a port of its code.
 ; Original Space Invaders-style game. MIT licence - see LICENSE.
 ; ============================================================================
@@ -1364,7 +1364,7 @@ sprite_fast:
     ret
 
 ; Mystery ship on row 1. Award 500 points if the laser hits its four-cell
-; bounding box. The ship art is original. No bonus sound beyond hit FX.
+; bounding box. The ship art is original. Use a distinct large explosion.
 render_ufo:
     ld a,(ufox)
     or a
@@ -1380,7 +1380,7 @@ render_ufo:
     xor a
     ld (shoty),a
     call ufo_reset
-    ld a,2
+    ld a,4
     ld (effect),a
     ld b,5
 ufo_bonus:
@@ -1486,25 +1486,25 @@ hi_replace:
     ldir
     ret
 
-; Cassette effects: short square-wave sweeps, no long delay loops.
-; Interrupts stay enabled; pitch is approximate. 8-18 cycles per effect.
-
 ; ==========================================================================
 ; 10 / CASSETTE SOUND EFFECTS
 ; ==========================================================================
-; Consume one pending effect ID (1 shot, 2 alien hit, 3 player damage).
-; Later events in the same frame can overwrite earlier ones. Select cycle
-; count C and initial half-period loop count D. Output 1 then 0 to FFH,
-; with DJNZ delays; increase D each cycle for a descending pitch sweep.
-; Short but blocking, no interrupt masking. Actual sound pitch depends on
-; CPU clock and interrupt overhead. Returns with cassette output low.
+; Effect IDs: 1=laser, 2=alien explosion, 3=player damage, 4=UFO explosion.
+; Later events in one frame can replace earlier ones (existing policy).
+; One-bit output FFH: asymmetric high/low delay pairs create complex
+; timbre without a DAC. A zero high delay terminates each finite table.
+; Laser sweeps down into a low tail; explosion widths vary irregularly
+; to produce a noise-like crackle and rumble. No random generator needed.
+; Every four pulses service the music clock/UART while output is low.
+; HL is saved; AF/BC/DE are volatile. Delays are blocking but bounded,
+; interrupts stay enabled and the output always ends low.
 effect_play:
     ld a,(demo)
     or a
     jp z,effect_normal
     xor a
     ld (effect),a
-    ret                       ; Silent attract mode.
+    ret
 effect_normal:
     ld a,(effect)
     or a
@@ -1513,35 +1513,67 @@ effect_normal:
     xor a
     ld (effect),a
     ld a,b
+    ld hl,fx_laser_data
     cp 1
-    jp z,fx_shot
+    jp z,fx_start
+    ld hl,fx_alien_data
     cp 2
-    jp z,fx_hit
-    ld c,18
-    ld d,22
-    jp tone
-fx_shot:
-    ld c,10
-    ld d,8
-    jp tone
-fx_hit:
-    ld c,14
-    ld d,13
-tone:
+    jp z,fx_start
+    ld hl,fx_ufo_data
+    cp 4
+    jp z,fx_start
+    ld hl,fx_damage_data
+fx_start:
+    ld c,4
+fx_pulse:
+    ld b,(hl)
+    inc hl
+    ld a,b
+    or a
+    ret z
     ld a,1
     out (0xff),a
-    ld b,d
-tone_high:
-    djnz tone_high
+fx_high:
+    djnz fx_high
     xor a
     out (0xff),a
-    ld b,d
-tone_low:
-    djnz tone_low
-    inc d
+    ld b,(hl)
+    inc hl
+fx_low:
+    djnz fx_low
     dec c
-    jp nz,tone
-    ret
+    jp nz,fx_pulse
+    push hl
+    call music_service
+    pop hl
+    ld c,4
+    jp fx_pulse
+
+; Delay pairs are editable independently of the renderer or music.
+fx_laser_data:
+    db 7,9,9,11,12,14,15,18,19,22,24,28,30,33,36,40
+    db 43,46,51,55,60,64,71,76,28,57,36,75,46,92,58,110
+    db 0
+
+fx_alien_data:
+    db 12,19,35,8,16,49,58,21,20,65,75,13,42,32,12,92
+    db 80,36,28,54,91,19,33,74,52,45,17,101,92,29,65,63
+    db 24,88,110,36,51,91,70,47,35,118,96,51,64,100,82,122
+    db 0
+
+fx_damage_data:
+    db 22,22,23,23,24,24,25,25,26,26,27,27,28,28,29,29
+    db 30,30,31,31,32,32,33,33,34,34,35,35,36,36,37,37
+    db 38,38,39,39
+    db 0
+
+fx_ufo_data:
+    db 8,13,15,29,49,11,21,70,84,18,31,97,65,41,17,113
+    db 102,23,48,81,29,125,116,39,80,59,34,140,135,48,57,106
+    db 92,77,45,148,130,55,72,117,104,66,53,157,144,74,86,134
+    db 117,84,68,169,153,91,102,161
+    db 0
+
 ; MIDI queue: send only if transmitter ready; never wait in gameplay.
 ; 12 MIDI bytes per beat, plus one tick token in timed mode.
 
@@ -2044,7 +2076,7 @@ bombphase: db 0                 ; Subcounter for three-tick bomb movement.
 launchx: db 0                   ; Candidate firing column from last render.
 launchy: db 0                   ; Candidate firing row, zero=no candidate.
 cooldown: db 0                  ; Player invulnerability/blink countdown.
-effect: db 0                    ; Pending cassette effect ID, zero=none.
+effect: db 0                    ; 0 none, 1 laser, 2 alien, 3 player, 4 UFO.
 rowindex: db 0                  ; Current formation row index.
 rowy: db 0                      ; Current top character row.
 colx: db 0                      ; Current alien left column.
