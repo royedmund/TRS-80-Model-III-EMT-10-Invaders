@@ -211,6 +211,7 @@ score_reset:
     ld (qcount),a
     ld (qpos),a
     ld (musicindex),a
+    ld (musiclive),a
     ld (streaming),a
     ld (oldbass),a
     ld (oldupper),a
@@ -560,6 +561,14 @@ shield_clear:
     ld hl,shield+53
     call make_shield
     call render
+    ld a,(musiclive)
+    or a
+    jp nz,wave_clock_ready
+    ld a,(0x4288)
+    ld (musicclock),a
+    ld a,1
+    ld (musiclive),a
+wave_clock_ready:
     ld a,(0x4288)
     ld (lasttick),a
 
@@ -1099,6 +1108,12 @@ render_shields:
     ld hl,aliens
     ld (flagptr),hl
 row_loop:
+    ; Service between formation rows, with no live register dependencies.
+    ld a,(musiclive)
+    or a
+    jp z,row_audio_done
+    call music_service
+row_audio_done:
     ld a,(rowindex)
     ld e,a
     ld d,0
@@ -1528,7 +1543,7 @@ tone_low:
     jp nz,tone
     ret
 ; MIDI queue: send only if transmitter ready; never wait in gameplay.
-; 12 bytes per beat, separate note-offs and note-ons for two split voices.
+; 12 MIDI bytes per beat, plus one tick token in timed mode.
 
 ; ==========================================================================
 ; 11 / NON-BLOCKING RS-232 MIDI QUEUE
@@ -1566,6 +1581,9 @@ midi_pump:
 ; Foreground audio service: independent of game update count. Safe only
 ; between routines: AF/BC/DE/HL are volatile. No waiting for UART.
 music_service:
+    ld a,(midi)
+    or a
+    ret z
     call midi_pump
     ; Consume at most one elapsed clock tick per call, and never overwrite
     ; a pending batch. Repeated calls catch up on ticks missed by rendering.
@@ -1676,6 +1694,21 @@ midi_stop:
     ld a,(midi)
     or a
     ret z
+    ld a,(streaming)
+    or a
+    jp z,stop_raw
+    ; FC cancels pending timed notes even between bytes of a message.
+    xor a
+    ld (qpos),a
+    ld a,252
+    ld (queue),a
+    ld a,1
+    ld (qcount),a
+    call intro_flush
+    xor a
+    ld (streaming),a
+    ret
+stop_raw:
     ld bc,8192
 flush_loop:
     push bc
@@ -1690,20 +1723,6 @@ flush_loop:
     jp nz,flush_loop
     ret
 flush_done:
-    ld a,(streaming)
-    or a
-    jp z,stop_cleanup
-    ; Discard Nano lookahead on BREAK/game over; it also sends panic.
-    ld a,252                  ; FC: cancel pending timed stream.
-    ld (queue),a
-    ld a,1
-    ld (qcount),a
-    call intro_flush
-    xor a
-    ld (streaming),a
-    ld a,(qcount)
-    or a
-    ret nz
 stop_cleanup:
     ld hl,cleanup_midi
     ld de,queue
@@ -1965,6 +1984,7 @@ midi: db 0                      ; 0=cassette only, 1=MIDI enabled.
 musicrate: db 6                 ; Ticks per gameplay note pair (5/6).
 musicwait: db 0                 ; LDOS ticks to next pair.
 musicclock: db 0                ; Last consumed LDOS tick (modulo 256).
+musiclive: db 0                 ; Set after first render, retained across waves.
 buffered: db 0                  ; Menu selection: 1 requires timed Nano firmware.
 streaming: db 0                 ; Active timed gameplay stream, never during title.
 musicindex: db 0                ; Index 0..15 into both melody tables.
