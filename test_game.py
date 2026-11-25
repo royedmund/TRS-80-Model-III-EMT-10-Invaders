@@ -49,7 +49,7 @@ class CPU:
    # Real-time performance and interrupt behaviour are not modelled.
    if self.steps%3000==0:
     self.ticks+=1;self.mem[0x4288]=self.ticks&255
-   self.mem[0x3810]=4 if self.clock=='2' else 8
+   self.mem[0x3810]=1 << int(self.clock)
    p=self.pc
    if p==SYMS['intro_loop'] and self.intro_tick is None:self.intro_tick=self.ticks
    if p==SYMS['frame_wait'] and self.game_tick is None:self.game_tick=self.ticks;self.game_uart=len(self.uart);self.first_frame=bytes(self.mem[0x3c00:0x4000])
