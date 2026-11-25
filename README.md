@@ -2,7 +2,41 @@
 
 An original Space Invaders-style Z80 game for a 48K TRS-80 Model III, with cassette sound effects and simultaneous Yamaha EMT-10 AWM music over the project's external 9600-baud RS-232-to-MIDI bridge.
 
-**v0.5 performance prototype (same arcade gameplay, faster rendering and scoring)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+**v0.6 audio-clock prototype (based on v0.5 rendering improvements)** — assembled and tested with a restricted opcode harness; not yet tested in trs80gp or on physical hardware. Target: LDOS 5.3.1, 64-column mode. Original music and graphics; no arcade ROM, commercial audio or video included.
+
+## v0.6 audio-clock prototype
+
+This branch keeps the v0.5 graphics, rules, original intro and bass/brass
+ostinato, and adds the following audio changes:
+
+- Music advances from the elapsed LDOS TIMER$ low byte rather than the
+  number of completed gameplay updates. The game still uses observed
+  updates; audio catches up independently.
+- UART service is non-blocking in gameplay, including between alien rows,
+  and uses the original bounded 18-byte host staging buffer.
+- 2/3 select raw MIDI at 25/30 Hz; 4/5 select timed Nano transport at 25/30 Hz.
+  Default raw 25 Hz. The selected mode appears at the bottom of the menu.
+- **Only use 4/5 with the MIDIPLAY v0.8/v0.9 buffered Nano firmware.**
+  Same hardware and sketch, no wiring change. The title remains raw in all
+  modes. Timed transport starts at gameplay and stops on BREAK/game over.
+- The Nano receives FD (25 Hz) or F9 (30 Hz) start, F8 per elapsed tick
+  including rests, and FC to cancel. These are link-control bytes, not
+  musical events. FC discards delayed music and triggers firmware panic
+  (pedal resets and all-notes-off). Raw mode retains explicit note-offs.
+- The Arduino FIFO provides nominal 160 ms lookahead for background music.
+  Cassette effects remain immediate and unchanged. Buffering is optional
+  because delays may be perceptible for gameplay-synchronised sounds.
+
+Download the branch's INVADERS.CMD and transfer it to LDOS in binary mode.
+Launch using the existing trs80gp command. First test raw mode 2/3; next
+test buffered 4/5 after installing the compatible Nano sketch linked in
+the [MIDI player repository](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/tree/main/player/firmware/serial_to_midi_buffered).
+Select the actual LDOS tick frequency. The raw capture decoder is intended
+for modes 2/3, not the timed protocol.
+
+See [AUDIO-CLOCK.md](AUDIO-CLOCK.md) for the new design and checks.
+The CMD was assembled with a baseline-verified assembler and exercised
+with a restricted opcode harness, not trs80gp or real hardware.
 
 ## Quick start in trs80gp
 
@@ -24,7 +58,7 @@ The quoted `>midi-capture.bin` is the emulator endpoint, not shell redirection. 
 
 To use your own LDOS image instead, replace `-ld` with `-d0 "ldos.dsk"`. Do not use a bare BASIC session or rely on the default TRSDOS boot.
 
-At the title screen press 2 for 25 Hz LDOS ticks (50 Hz video) or 3 for 30 Hz ticks (60 Hz video), then ENTER to play the eight-second intro on the title screen and automatically start the game, or CLEAR to start with cassette effects only. During the intro SPACE skips to gameplay with music, CLEAR mutes MIDI for the round, and BREAK exits. Left/right arrows move, SPACE fires, BREAK exits. At game over ENTER returns to the menu. SPACE at the main menu starts the silent automatic gameplay demonstration. If no menu selection is made for about six seconds, the demo launches automatically. It runs for 20 seconds of observed game updates (longer if frames are missed), or until the demo loses; ENTER, CLEAR, arrows or SPACE return to the menu after the initial launch key is released. BREAK exits to LDOS. Demo scores never update the session high score. Serial capture should be empty in cassette-only mode. Exit with BREAK before closing the emulator to flush the note-off messages. Use `python capture_midi.py midi-capture.bin` after closing the capture. The file is raw MIDI messages, not a .MID file.
+At the title screen press 2 for raw 25 Hz LDOS ticks (50 Hz video) or 3 for raw 30 Hz ticks (60 Hz video), or 4/5 for timed 25/30 Hz with the compatible buffered Nano firmware, then ENTER to play the eight-second intro on the title screen and automatically start the game, or CLEAR to start with cassette effects only. During the intro SPACE skips to gameplay with music, CLEAR mutes MIDI for the round, and BREAK exits. Left/right arrows move, SPACE fires, BREAK exits. At game over ENTER returns to the menu. SPACE at the main menu starts the silent automatic gameplay demonstration. If no menu selection is made for about six seconds, the demo launches automatically. It runs for 20 seconds of observed game updates (longer if frames are missed), or until the demo loses; ENTER, CLEAR, arrows or SPACE return to the menu after the initial launch key is released. BREAK exits to LDOS. Demo scores never update the session high score. Serial capture should be empty in cassette-only mode. Exit with BREAK before closing the emulator to flush the note-off messages. Use `python capture_midi.py midi-capture.bin` after closing the capture. The file is raw MIDI messages, not a .MID file.
 
 Expected opening bytes: `B0 40 00 B0 42 00 B0 43 00 B0 7B 00 C0 37` (pedals off, all notes off, Upright Bass + Brass). After the intro and explicit note-off cleanup, gameplay selects `C0 47` (Electric Bass + Brass) and plays pairs of notes, e.g. `90 24 50 90 43 44`. At exit explicit note-offs and pedal/all-notes-off follow. On real hardware the bridge converts 9600 8N1 to 31250 MIDI; never wire the RS-232 port straight to MIDI IN.
 
@@ -32,7 +66,8 @@ Expected opening bytes: `B0 40 00 B0 42 00 B0 43 00 B0 7B 00 C0 37` (pedals off,
 
 | Key | Menu | Gameplay / demo |
 |---|---|---|
-| 2 / 3 | Select 25 / 30 Hz | — |
+| 2 / 3 | Select raw 25 / 30 Hz | — |
+| 4 / 5 | Select buffered 25 / 30 Hz (compatible Nano only) | — |
 | ENTER | Intro and MIDI game | Demo: return to menu |
 | CLEAR | Cassette-only game | Intro: mute; demo: return |
 | SPACE | Start silent demo | Fire; intro: skip; demo: return |
@@ -50,7 +85,7 @@ Expected opening bytes: `B0 40 00 B0 42 00 B0 43 00 B0 7B 00 C0 37` (pedals off,
 - 35 invaders (seven columns, five rows), four two-row bunkers, three animated alien types, mystery saucer, session high score, player laser, enemy bombs, score, lives, successive waves and faster aliens as their numbers fall.
 - Direct keyboard matrix, 1 KB RAM screen buffer and block sprites. One update per observed LDOS tick, not cycle-exact timing. No disk reads during play.
 - Cassette output FFH produces short procedural firing, hit and damage sounds. The brief effect loops are blocking; actual pitch/volume need testing.
-- Embedded original 16-step bass/brass ostinato, using native EMT-10 Bass Split program 71 on channel 1. Non-blocking UART queue; no MIDI file parsing during gameplay. Missing or busy UART does not trap the main loop. Exit cleanup is bounded; with disconnected hardware delivery cannot be guaranteed.
+- Embedded original 16-step bass/brass ostinato, using native EMT-10 Bass Split program 71 on channel 1. Non-blocking UART queue, elapsed-clock scheduler, optional timed Nano transport; no MIDI file parsing during gameplay. Missing or busy UART does not trap the main loop. Exit cleanup is bounded; with disconnected hardware delivery cannot be guaranteed.
 - INTRO.MID: standalone original eight-second Upright Bass + Brass intro (program 55), format 0. Play it with MIDIPLAY from the related project. The same composition is embedded in the game as two compact event tables for 25/30 Hz. The title screen remains visible for eight seconds, then gameplay starts. The title sequence has no disk reads; a bounded flush and explicit note-offs handle skipping, muting and exit. If the UART stalls during the intro cleanup, MIDI is disabled for that round. Level-completion and game-over music are planned, not implemented.
 
 ## Performance improvements in v0.5
@@ -68,7 +103,7 @@ Estimated nominal Z80 T-states for a complete opening-frame render: 93,084 (v0.4
 
 ## Developer documentation
 
-`INVADERS.ASM` includes numbered sections, a hardware and memory map, routine contracts, algorithm explanations and comments for every workspace declaration. See [SOURCE-GUIDE.md](SOURCE-GUIDE.md) for the frame scheduler, modification points, MIDI queue rules and build workflow. This edition preserves the v0.4 attract mode and improves the rendering and score hot paths. See the generated map for current addresses.
+`INVADERS.ASM` includes numbered sections, a hardware and memory map, routine contracts, algorithm explanations and comments for every workspace declaration. See [SOURCE-GUIDE.md](SOURCE-GUIDE.md) for the frame scheduler, modification points, MIDI queue rules and build workflow. This edition preserves the v0.4 attract mode and v0.5 rendering and scoring improvements while replacing the gameplay music scheduler. See the generated map for current addresses.
 
 ## Related project
 
