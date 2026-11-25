@@ -59,7 +59,7 @@ regression cases. The previous v0.6 architecture and test results follow.
 
 ## v0.6 audio-clock prototype
 
-This branch keeps the v0.5 graphics, rules, original intro and bass/brass
+This release keeps the v0.5 graphics, rules, original intro and bass/brass
 ostinato, and adds the following audio changes:
 
 - Music advances from the elapsed LDOS TIMER$ low byte rather than the
@@ -80,7 +80,7 @@ ostinato, and adds the following audio changes:
   Cassette effects remain immediate and unchanged. Buffering is optional
   because delays may be perceptible for gameplay-synchronised sounds.
 
-Download the branch's INVADERS.CMD and transfer it to LDOS in binary mode.
+Download INVADERS.CMD and transfer it to LDOS in binary mode.
 Launch using the existing trs80gp command. First test raw mode 2/3; next
 test buffered 4/5 after installing the compatible Nano sketch linked in
 the [MIDI player repository](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/tree/main/player/firmware/serial_to_midi_buffered).
@@ -90,6 +90,116 @@ for modes 2/3, not the timed protocol.
 See [AUDIO-CLOCK.md](AUDIO-CLOCK.md) for the new design and checks.
 The CMD was assembled with a baseline-verified assembler and exercised
 with a restricted opcode harness, not trs80gp or real hardware.
+
+## Real hardware — RS-232 to MIDI setup
+
+Star Siege uses the same external interface and Arduino firmware as the
+[TRS-80 Model III Simple MIDI Out / MIDIPlay project](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out).
+No modification to the Model III or separate game-specific firmware is needed.
+MIDIPlay is useful for testing the interface independently; the game does
+not require MIDIPlay to be loaded or running.
+
+### 1. Build and connect the interface
+
+Required: a Model III with 48 KB RAM and its RS-232 interface, a MAX3232
+RS-232-to-logic converter, classic 5 V Arduino Nano (ATmega328P),
+5-pin DIN MIDI OUT socket, two 220-ohm resistors, regulated 5 V supply,
+and an EMT-10 or compatible MIDI receiver. The game's native program
+numbers are specifically intended for the EMT-10.
+
+```text
+Model III DB-25 RS-232 TXD (9600 baud, 8N1)
+        |
+        v
+MAX3232 RS-232 level converter
+        |
+        v
+Arduino Nano D10 (software serial RX)
+        |
+        v
+Arduino Nano D1 (hardware TX, 31250 baud)
+        |
+        v
+MIDI OUT DIN --> Yamaha EMT-10 MIDI IN --> amplifier
+```
+
+Follow the [complete wiring instructions and parts list](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out#parts-list)
+and [interface schematic](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/blob/main/hardware/minimal-midi-out.svg).
+The Nano receives logic-level serial on D10 and transmits MIDI on D1.
+**Never connect the Model III RS-232 output directly to MIDI IN or the
+Arduino logic input.** Use the MAX3232 and the documented MIDI output
+circuit. The direct Nano MIDI output is a prototype; a buffered
+specification-compliant MIDI output is preferred for production.
+Disconnect MIDI during Nano programming/reset to avoid bootloader traffic.
+
+### 2. Install Arduino firmware
+
+In Arduino IDE select the classic Nano, ATmega328P, the correct serial
+port and bootloader option for the board. Choose one of the following:
+
+- [Original transparent serial-to-MIDI sketch](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/blob/main/firmware/serial_to_midi/serial_to_midi.ino):
+  raw modes 2/3 only.
+- [Buffered serial-to-MIDI sketch](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/blob/main/player/firmware/serial_to_midi_buffered/serial_to_midi_buffered.ino):
+  raw modes 2/3 and optional timed modes 4/5. Check Arduino IDE
+  compilation and SRAM usage before uploading. The timed firmware
+  uses a 192-entry FIFO and nominal 160 ms lookahead.
+
+The buffered sketch reserves five link-control bytes and is not a
+general-purpose transparent MIDI real-time bridge. **Do not select
+game modes 4/5 with the original transparent firmware.** No wiring
+change is required between these two sketches.
+
+### 3. Test with MIDIPlay before running the game
+
+Set the EMT-10 to receive channel 1 (or OMNI) and connect its audio
+output to an amplifier. Transfer
+[MIDIPLAY.CMD](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/blob/main/player/MIDIPLAY.CMD)
+and [ROCKRAW.MID](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/blob/main/player/ROCKRAW.MID)
+to an LDOS disk in binary mode. Follow the
+[MIDIPlay player instructions](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out/blob/main/player/README.md).
+At the LDOS prompt, assuming the files are on drive 0:
+
+```text
+MIDIPLAY ROCKRAW/MID:0
+```
+
+Select the correct LDOS tick rate: 2 = raw 25 Hz, 3 = raw 30 Hz,
+4 = timed 25 Hz or 5 = timed 30 Hz (buffered sketch only).
+First verify raw playback and BREAK, then try timed playback.
+The TRS-80 link is 9600 baud, 8N1; the Nano MIDI output is 31250 baud.
+Disable flow control and text translation when using other serial tools.
+
+### 4. Start Star Siege on the Model III
+
+Transfer INVADERS.CMD in binary mode to the LDOS disk and type:
+
+```text
+INVADERS
+```
+
+Choose 2/3 for raw or 4/5 for timed playback, matching the installed
+firmware and actual LDOS timer frequency, then press ENTER. The title
+music uses raw MIDI in every mode. Gameplay music uses the chosen
+transport. CLEAR starts a cassette-only game; SPACE starts the silent
+demo. BREAK exits to LDOS and stops music.
+
+Cassette sound effects are generated independently through the Model III
+cassette output (port FFH). Connect to a suitable cassette audio
+monitor/amplifier using the appropriate cable, separate from the EMT-10
+audio path. Do not directly tie the two audio outputs together.
+
+### 5. Troubleshooting
+
+- No MIDI: check MAX3232 direction, shared logic ground, Nano D10/D1
+  connections, DIN pin numbering, EMT-10 receive channel and audio output.
+  Confirm raw MIDIPlay playback first.
+- Incorrect tempo: check LDOS tick selection (25 or 30 Hz).
+- Buffered faults: check firmware, onboard LED, serial wiring and SRAM
+  usage. Reset the Nano and use raw playback as a fallback.
+- Stuck notes: press BREAK; if cleanup cannot reach the module, reset
+  the EMT-10 using its normal procedure.
+- For the detailed interface design, firmware notes and standalone
+  MIDI demonstrations, see the [MIDIPlay repository](https://github.com/royedmund/TRS-80-Model-III-Simple-Midi-Out).
 
 ## Quick start in trs80gp
 
@@ -111,9 +221,9 @@ The quoted `>midi-capture.bin` is the emulator endpoint, not shell redirection. 
 
 To use your own LDOS image instead, replace `-ld` with `-d0 "ldos.dsk"`. Do not use a bare BASIC session or rely on the default TRSDOS boot.
 
-At the title screen press 2 for raw 25 Hz LDOS ticks (50 Hz video) or 3 for raw 30 Hz ticks (60 Hz video), or 4/5 for timed 25/30 Hz with the compatible buffered Nano firmware, then ENTER to play the eight-second intro on the title screen and automatically start the game, or CLEAR to start with cassette effects only. During the intro SPACE skips to gameplay with music, CLEAR mutes MIDI for the round, and BREAK exits. Left/right arrows move, SPACE fires, BREAK exits. At game over ENTER returns to the menu. SPACE at the main menu starts the silent automatic gameplay demonstration. If no menu selection is made for about six seconds, the demo launches automatically. It runs for 20 seconds of observed game updates (longer if frames are missed), or until the demo loses; ENTER, CLEAR, arrows or SPACE return to the menu after the initial launch key is released. BREAK exits to LDOS. Demo scores never update the session high score. Serial capture should be empty in cassette-only mode. Exit with BREAK before closing the emulator to flush the note-off messages. Use `python capture_midi.py midi-capture.bin` after closing the capture. The file is raw MIDI messages, not a .MID file.
+At the title screen press 2 for raw 25 Hz LDOS ticks (50 Hz video) or 3 for raw 30 Hz ticks (60 Hz video), or 4/5 for timed 25/30 Hz with the compatible buffered Nano firmware, then ENTER to play the eight-second intro on the title screen and automatically start the game, or CLEAR to start with cassette effects only. During the intro SPACE skips to gameplay with music, CLEAR mutes MIDI for the round, and BREAK exits. Left/right arrows move, SPACE fires, BREAK exits. At game over ENTER returns to the menu. SPACE at the main menu starts the silent automatic gameplay demonstration. If no menu selection is made for about six seconds, the demo launches automatically. It runs for 20 seconds of observed game updates (longer if frames are missed), or until the demo loses; ENTER, CLEAR, arrows or SPACE return to the menu after the initial launch key is released. BREAK exits to LDOS. Demo scores never update the session high score. Serial capture should be empty in cassette-only mode. Exit with BREAK before closing the emulator to flush the note-off messages. Use `python capture_midi.py midi-capture.bin` after closing the capture. For raw modes 2/3 the file contains raw MIDI messages, not a .MID file; timed captures also contain transport tokens and are not supported by the raw decoder.
 
-Expected opening bytes: `B0 40 00 B0 42 00 B0 43 00 B0 7B 00 C0 37` (pedals off, all notes off, Upright Bass + Brass). After the intro and explicit note-off cleanup, gameplay selects `C0 47` (Electric Bass + Brass) and plays pairs of notes, e.g. `90 24 50 90 43 44`. At exit explicit note-offs and pedal/all-notes-off follow. On real hardware the bridge converts 9600 8N1 to 31250 MIDI; never wire the RS-232 port straight to MIDI IN.
+Expected opening bytes: `B0 40 00 B0 42 00 B0 43 00 B0 7B 00 C0 37` (pedals off, all notes off, Upright Bass + Brass). After the intro and explicit note-off cleanup, gameplay selects `C0 47` (Electric Bass + Brass) and plays pairs of notes, e.g. `90 24 50 90 43 44`. In raw mode, exit sends explicit note-offs and pedal/all-notes-off. In timed gameplay, FC cancels queued music and the Nano performs panic cleanup. On real hardware the bridge converts 9600 8N1 to 31250 MIDI; never wire the RS-232 port straight to MIDI IN.
 
 ## Controls and test checklist
 
@@ -152,7 +262,7 @@ Estimated nominal Z80 T-states for a complete opening-frame render: 93,084 (v0.4
 
 ## Build and test
 
-`python build.py` assembles the restricted Z80 source (standard library only), creates INVADERS.CMD and INVADERS.MAP, and verifies CMD records. `python test_game.py` runs the audio/game-loop mock tests; `python test_graphics.py` verifies the new rendering and collision routines. `python make_intro.py` regenerates the standalone intro. Run `python embed_intro.py` to regenerate both embedded event tables before `python build.py`. See TESTS.txt for results. Mock tests verify manual and idle demo activation, demo scoring isolation and silent operation, both title clock rates and byte streams, skip, mute, BREAK during the title, no UART, movement, firing, scoring and cassette pulses; they do not model real timing, interrupts, display or electrical behaviour.
+`python build.py` assembles the restricted Z80 source (standard library only), creates INVADERS.CMD and INVADERS.MAP, and verifies CMD records. `python test_game.py` runs the audio/game-loop mock tests; `python test_graphics.py` verifies the new rendering and collision routines. `python make_intro.py` regenerates the standalone intro. Run `python embed_intro.py` to regenerate both embedded event tables before `python build.py`. Run `python test_audio_clock.py` and `python test_cassette_fx.py` for the added regression cases. See TESTS.txt for historical results and the v0.6–v0.8 sections above for targeted checks. Mock tests verify manual and idle demo activation, demo scoring isolation and silent operation, both title clock rates and byte streams, skip, mute, BREAK during the title, no UART, movement, firing, scoring and cassette pulses; they do not model real timing, interrupts, display or electrical behaviour.
 
 ## Developer documentation
 
