@@ -1,5 +1,5 @@
 ; ============================================================================
-; STAR SIEGE v0.5 - TRS-80 Model III / Yamaha EMT-10
+; STAR SIEGE v0.6 - audio clock prototype - TRS-80 Model III / Yamaha EMT-10
 ; Original recreation inspired by Space Intruders (1980), not a port of its code.
 ; Original Space Invaders-style game. MIT licence - see LICENSE.
 ; ============================================================================
@@ -13,7 +13,7 @@
 ;
 ; HARDWARE INTERFACE (addresses in hexadecimal)
 ;   3800-38FF  memory-mapped keyboard matrix (active-high key bits).
-;   3810       bit 2 = '2', bit 3 = '3' (timer selection).
+;   3810       bits 2..5 = '2'..'5' (clock and audio transport).
 ;   3840       bit 0 ENTER, 1 CLEAR, 2 BREAK, 5 LEFT, 6 RIGHT, 7 SPACE.
 ;   3C00-3FFF  1024-byte video RAM, one byte per character cell.
 ;   402D       LDOS return-to-DOS entry used at exit.
@@ -25,7 +25,7 @@
 ; MEMORY LAYOUT
 ;   See generated INVADERS.MAP for exact addresses; origin 6000H.
 ;   35 alien flags, two shield rows, 1K back buffer, 128-byte private stack.
-;   All original v0.2 MIDI routines retained; DOS memory is not overwritten.
+;   MIDI uses a small foreground queue; DOS memory is not overwritten.
 ;   New sprite data is original; 6x3 pixel masks packed into TRS-80 blocks.
 
 ; CONTROL FLOW
@@ -35,7 +35,7 @@
 ;   Each observed timer change: player, shot, aliens, bomb, render/collisions,
 ;   cassette effect, music scheduler, UART pump, game-over/wave checks.
 ;   gameover -> again -> menu; BREAK -> quit -> LDOS.
-;   Timer changes are sampled, not counted; missed ticks are not replayed.
+;   Game ticks are sampled; music separately consumes elapsed LDOS ticks.
 ;   No DOS disk I/O during play. Screen and audio share the foreground CPU.
 ;
 ; CALLING CONVENTION
@@ -58,6 +58,7 @@ start:
     ld sp,stacktop
     xor a
     ld (midi),a
+    ld (buffered),a
     out (0xff),a
     ld a,5                   ; Default 25 Hz until user chooses clock.
     ld (musicrate),a
@@ -68,6 +69,7 @@ menu:
     xor a
     ld (demo),a
     ld (midi),a
+    ld (streaming),a
     call blank
     ld hl,pointsmsg
     ld de,screen+80
@@ -91,30 +93,45 @@ menu:
     ld de,screen+840
     call text
     call present
+    call show_audio_mode
     call menu_timer_reset
 
-; Poll the keyboard matrix directly. BREAK exits; 2 or 3 selects the
-; clock. The two music rates are 5 or 6 game ticks per step (about 200 ms).
+; 2/3 select raw 25/30 Hz; 4/5 select buffered 25/30 Hz.
+; The latter require MIDIPLAY v0.8/v0.9 compatible Nano firmware.
+; Clock and transport remain selected until changed; default is raw 25 Hz.
 menu_wait:
     ld a,(0x3840)
     bit 2,a
     jp nz,quit
     ld a,(0x3810)
+    ld c,0
     bit 2,a
     jp nz,clock25
     bit 3,a
+    jp nz,clock30
+    ld c,1
+    bit 4,a
+    jp nz,clock25
+    bit 5,a
     jp z,menu_actions
-    ld a,6
+clock30:
+    ld b,6
     jp clock_set
 clock25:
-    ld a,5
+    ld b,5
 clock_set:
-    ld b,a
     ld a,(musicrate)
     cp b
+    jp nz,clock_changed
+    ld a,(buffered)
+    cp c
     jp z,menu_actions
+clock_changed:
     ld a,b
     ld (musicrate),a
+    ld a,c
+    ld (buffered),a
+    call show_audio_mode
     call menu_timer_reset
 menu_actions:
     ld a,(0x3840)
@@ -139,6 +156,23 @@ menu_limit:
     cp b
     jp nc,demo_start
     jp menu_wait
+show_audio_mode:
+    ; All four strings have identical lengths; overwrite the old status.
+    ld hl,raw25msg
+    ld a,(buffered)
+    or a
+    jp z,show_clock
+    ld hl,buf25msg
+show_clock:
+    ld a,(musicrate)
+    cp 5
+    jp z,show_mode_text
+    ld de,20
+    add hl,de
+show_mode_text:
+    ld de,0x3c00+970
+    jp text
+
 menu_timer_reset:
     ld a,(0x4288)
     ld (menutick),a
@@ -177,17 +211,35 @@ score_reset:
     ld (qcount),a
     ld (qpos),a
     ld (musicindex),a
-    ld (musicwait),a
+    ld (streaming),a
     ld (oldbass),a
     ld (oldupper),a
+    ld a,1
+    ld (musicwait),a
     ld a,(midi)
     or a
     jp z,newwave
-    ld hl,setup_midi
+    ld a,(0x4288)
+    ld (musicclock),a
     ld de,queue
+    ld a,(buffered)
+    or a
+    jp z,game_music_setup
+    ld (streaming),a
+    ld a,(musicrate)
+    cp 5
+    ld a,253                  ; FD: timed start at 25 Hz.
+    jp z,game_start_token
+    ld a,249                  ; F9: timed start at 30 Hz.
+game_start_token:
+    ld (queue),a
+    inc de
+game_music_setup:
+    ld hl,setup_midi
     ld bc,14
     ldir
-    ld a,14
+    ld a,(streaming)
+    add a,14
     ld (qcount),a
     jp newwave
 
@@ -517,7 +569,7 @@ shield_clear:
 ; If lives reach zero or formation base row reaches 7, end the game.
 ; If alive reaches zero, increment wave and initialise the next formation.
 frame_wait:
-    call midi_pump
+    call music_service
     ld a,(0x3840)
     bit 2,a
     jp nz,quit
@@ -547,16 +599,18 @@ frame_clock:
 frame_play:
     call player
     call advance_shot
+    call music_service
     call advance_aliens
     ld a,(ay)
     cp 7
     jp nc,gameover
     call advance_bomb
     call advance_ufo
+    call music_service
     call render
+    call music_service
     call effect_play
-    call music_tick
-    call midi_pump
+    call music_service
     ld a,(lives)
     or a
     jp z,gameover
@@ -1509,20 +1563,41 @@ midi_pump:
     ld (qpos),a
     ret
 
-; Called once per game update. If MIDI disabled, return. Count down
-; musicwait; when due and queue empty, prepare the next 12-byte batch.
-; If UART busy, defer the beat rather than blocking or overwriting bytes.
-; Timing follows game updates and therefore can slow under load.
+; Foreground audio service: independent of game update count. Safe only
+; between routines: AF/BC/DE/HL are volatile. No waiting for UART.
+music_service:
+    call midi_pump
+    ; Consume at most one elapsed clock tick per call, and never overwrite
+    ; a pending batch. Repeated calls catch up on ticks missed by rendering.
 music_tick:
     ld a,(midi)
     or a
     ret z
-    ld a,(musicwait)
+    ld a,(qcount)
     or a
-    jp z,music_due
+    ret nz
+    ld a,(musicclock)
+    ld b,a
+    ld a,(0x4288)
+    cp b
+    ret z
+    ; Increment the logical clock, rather than replacing it with 'now'.
+    ; Unsigned byte wrap is intentional (service must occur within 256 ticks).
+    ld hl,musicclock
+    inc (hl)
+    ld a,(musicwait)
     dec a
     ld (musicwait),a
-    ret nz
+    jp z,music_due
+    ld a,(streaming)
+    or a
+    ret z
+    ; Send tick tokens even during rests to keep Nano deadlines advancing.
+    ld a,248                  ; F8: next transport tick.
+    ld (queue),a
+    ld a,1
+    ld (qcount),a
+    ret
 
 ; Read one bass and one upper pitch from parallel 16-entry tables.
 ; Queue 80 oldbass 00, 80 oldupper 00, 90 bass 50, 90 upper 44 (hex).
@@ -1531,9 +1606,6 @@ music_tick:
 ; index modulo 16, record new pitches, publish qcount last. Musicrate is
 ; 5 ticks at 25 Hz or 6 at 30 Hz (about five steps per second).
 music_due:
-    ld a,(qcount)
-    or a
-    ret nz
     ld a,(musicrate)
     ld (musicwait),a
     ld a,(musicindex)
@@ -1546,6 +1618,12 @@ music_due:
     add hl,de
     ld c,(hl)
     ld hl,queue
+    ld a,(streaming)
+    or a
+    jp z,music_payload
+    ld (hl),248               ; Tick token must precede its MIDI payload.
+    inc hl
+music_payload:
     ld (hl),128
     inc hl
     ld a,(oldbass)
@@ -1579,7 +1657,8 @@ music_due:
     inc a
     and 15
     ld (musicindex),a
-    ld a,12
+    ld a,(streaming)
+    add a,12
     ld (qcount),a
     ret
 ; Drain pending data and send pedal off + All Notes Off on exit.
@@ -1611,6 +1690,21 @@ flush_loop:
     jp nz,flush_loop
     ret
 flush_done:
+    ld a,(streaming)
+    or a
+    jp z,stop_cleanup
+    ; Discard Nano lookahead on BREAK/game over; it also sends panic.
+    ld a,252                  ; FC: cancel pending timed stream.
+    ld (queue),a
+    ld a,1
+    ld (qcount),a
+    call intro_flush
+    xor a
+    ld (streaming),a
+    ld a,(qcount)
+    or a
+    ret nz
+stop_cleanup:
     ld hl,cleanup_midi
     ld de,queue
     ld bc,18
@@ -1691,11 +1785,16 @@ quit:
 title: db "S T A R   S I E G E",0
 pointsmsg: db "25 / 20 / 10   MYSTERY 500",0
 help1: db "LEFT / RIGHT = MOVE   SPACE = FIRE",0
-help2: db "2 = 25 HZ   3 = 30 HZ (DEFAULT 25)",0
+help2: db "2/3 RAW 25/30HZ  4/5 BUFFERED 25/30HZ",0
 help3: db "ENTER = TITLE MUSIC   CLEAR = FX ONLY",0
 help4: db "BREAK = QUIT   DESTROY THE INVADERS",0
 demomsg: db "SPACE = DEMO / AUTO AFTER 6 SEC",0
 demohud: db "DEMO - KEY FOR MENU",0
+; 19 characters plus terminator each; show_audio_mode relies on stride 20.
+raw25msg: db "RAW 25HZ           ",0
+raw30msg: db "RAW 30HZ           ",0
+buf25msg: db "BUFFERED 25HZ      ",0
+buf30msg: db "BUFFERED 30HZ      ",0
 demo_lanes: db 13,29,45,59
 intromsg: db "INTRO: SPACE = SKIP   CLEAR = MUTE",0
 hud: db "SCORE:0000  HI:0000  LIVES:0  WAVE:0",0
@@ -1864,7 +1963,10 @@ demoticks: dw 0                ; Remaining observed game updates.
 savedsp: dw 0                   ; Original LDOS stack pointer.
 midi: db 0                      ; 0=cassette only, 1=MIDI enabled.
 musicrate: db 6                 ; Ticks per gameplay note pair (5/6).
-musicwait: db 0                 ; Countdown to next pair.
+musicwait: db 0                 ; LDOS ticks to next pair.
+musicclock: db 0                ; Last consumed LDOS tick (modulo 256).
+buffered: db 0                  ; Menu selection: 1 requires timed Nano firmware.
+streaming: db 0                 ; Active timed gameplay stream, never during title.
 musicindex: db 0                ; Index 0..15 into both melody tables.
 oldbass: db 0                   ; Last queued bass pitch.
 oldupper: db 0                  ; Last queued upper pitch.
